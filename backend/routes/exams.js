@@ -6,14 +6,28 @@ const { sendMail, emailTemplates } = require('../utils/email');
 const { Op } = require('sequelize');
 
 const EXAM_CONFIGS = {
-  jee: { name: 'JEE Main', sections: [{ name: 'Physics', count: 25 }, { name: 'Chemistry', count: 25 }, { name: 'Mathematics', count: 25 }], duration: 180, marking: { correct: 4, wrong: -1 } },
-  neet: { name: 'NEET UG', sections: [{ name: 'Physics', count: 45 }, { name: 'Chemistry', count: 45 }, { name: 'Biology', count: 90 }], duration: 200, marking: { correct: 4, wrong: -1 } },
-  upsc: { name: 'UPSC CSE Prelims', sections: [{ name: 'General Studies', count: 50 }, { name: 'CSAT', count: 30 }], duration: 120, marking: { correct: 2, wrong: -0.67 } },
-  ibps: { name: 'IBPS PO', sections: [{ name: 'Reasoning', count: 35 }, { name: 'Quantitative Aptitude', count: 35 }, { name: 'English Language', count: 30 }], duration: 60, marking: { correct: 1, wrong: -0.25 } },
-  ssc: { name: 'SSC CGL', sections: [{ name: 'General Intelligence', count: 25 }, { name: 'General Awareness', count: 25 }, { name: 'Quantitative Aptitude', count: 25 }, { name: 'English Comprehension', count: 25 }], duration: 60, marking: { correct: 2, wrong: -0.5 } },
-  gate: { name: 'GATE CS', sections: [{ name: 'General Aptitude', count: 10 }, { name: 'Core CS', count: 55 }], duration: 180, marking: { correct: 1, wrong: -0.33 } },
-  nda: { name: 'NDA', sections: [{ name: 'Mathematics', count: 120 }, { name: 'General Ability', count: 150 }], duration: 150, marking: { correct: 2.5, wrong: -0.83 } },
-  rrb: { name: 'RRB NTPC', sections: [{ name: 'Mathematics', count: 30 }, { name: 'General Intelligence', count: 30 }, { name: 'General Awareness', count: 40 }], duration: 90, marking: { correct: 1, wrong: -0.33 } },
+  // JEE Main — 90Q, 3 hours, +4/-1
+  jee: { name: 'JEE Main', sections: [{ name: 'Physics', count: 30 }, { name: 'Chemistry', count: 30 }, { name: 'Mathematics', count: 30 }], duration: 180, marking: { correct: 4, wrong: -1 } },
+  // JEE Advanced — Paper 1: 54Q, 3 hours, partial marking (+3 full, -1 wrong)
+  jee_adv: { name: 'JEE Advanced', sections: [{ name: 'Physics', count: 18 }, { name: 'Chemistry', count: 18 }, { name: 'Mathematics', count: 18 }], duration: 180, marking: { correct: 3, wrong: -1 } },
+  // NEET UG — 200Q (180 scored), 3h 20m, +4/-1
+  neet: { name: 'NEET UG', sections: [{ name: 'Physics', count: 45 }, { name: 'Chemistry', count: 45 }, { name: 'Botany', count: 45 }, { name: 'Zoology', count: 45 }], duration: 200, marking: { correct: 4, wrong: -1 } },
+  // UPSC CSE Prelims — GS Paper 1: 100Q 2h, CSAT: 80Q 2h (separate papers, combined here)
+  upsc: { name: 'UPSC CSE Prelims', sections: [{ name: 'General Studies', count: 100 }, { name: 'CSAT', count: 80 }], duration: 240, marking: { correct: 2, wrong: -0.67 } },
+  // IBPS PO Prelims — 100Q, 1 hour
+  ibps: { name: 'IBPS PO', sections: [{ name: 'English Language', count: 30 }, { name: 'Quantitative Aptitude', count: 35 }, { name: 'Reasoning Ability', count: 35 }], duration: 60, marking: { correct: 1, wrong: -0.25 } },
+  // SSC CGL Tier 1 — 100Q, 1 hour
+  ssc: { name: 'SSC CGL', sections: [{ name: 'General Intelligence & Reasoning', count: 25 }, { name: 'General Awareness', count: 25 }, { name: 'Quantitative Aptitude', count: 25 }, { name: 'English Comprehension', count: 25 }], duration: 60, marking: { correct: 2, wrong: -0.5 } },
+  // GATE CS — 65Q, 3 hours
+  gate: { name: 'GATE CS', sections: [{ name: 'General Aptitude', count: 10 }, { name: 'Engineering Mathematics', count: 10 }, { name: 'Core CS', count: 45 }], duration: 180, marking: { correct: 1, wrong: -0.33 } },
+  // NDA — Maths 120Q 2.5h + GAT 150Q 2.5h (Paper 1 + 2)
+  nda: { name: 'NDA', sections: [{ name: 'Mathematics', count: 120 }, { name: 'General Ability Test', count: 150 }], duration: 300, marking: { correct: 2.5, wrong: -0.83 } },
+  // RRB NTPC CBT 1 — 100Q, 90 min
+  rrb: { name: 'RRB NTPC', sections: [{ name: 'Mathematics', count: 30 }, { name: 'General Intelligence & Reasoning', count: 30 }, { name: 'General Awareness', count: 40 }], duration: 90, marking: { correct: 1, wrong: -0.33 } },
+  // CAT — 66Q, 2 hours
+  cat: { name: 'CAT', sections: [{ name: 'Verbal Ability & RC', count: 24 }, { name: 'Data Interpretation & LR', count: 20 }, { name: 'Quantitative Aptitude', count: 22 }], duration: 120, marking: { correct: 3, wrong: -1 } },
+  // CUET UG — 50Q per subject, 45 min per section
+  cuet: { name: 'CUET UG', sections: [{ name: 'Language', count: 40 }, { name: 'Domain Subject', count: 50 }, { name: 'General Test', count: 60 }], duration: 195, marking: { correct: 5, wrong: -1 } },
 };
 
 // ── GET CATEGORIES ────────────────────────────────────────────────────────────
@@ -148,6 +162,9 @@ router.post('/:id/start', auth, async (req, res) => {
       const totalQ = examData.sections.reduce((s, sec) => s + sec.questions.length, 0);
       const totalMarks = examData.total_marks;
 
+      // Override AI-returned duration — scale it proportionally to actual question count
+      examData.duration_minutes = Math.max(10, Math.round(config.duration * (totalQ / totalDefault)));
+
       generated = await GeneratedExam.create({
         scheduled_exam_id: scheduled.id,
         exam_data: examData,
@@ -196,7 +213,8 @@ router.post('/attempts/:id/submit', auth, async (req, res) => {
     if (attempt.status === 'submitted') return res.status(400).json({ error: 'Already submitted' });
 
     const generated = await GeneratedExam.findByPk(attempt.generated_exam_id);
-    const examData = generated.exam_data;
+    const rawExamData = generated.exam_data;
+    const examData = typeof rawExamData === 'string' ? JSON.parse(rawExamData) : rawExamData;
 
     // Calculate score
     let score = 0;
@@ -249,9 +267,10 @@ router.post('/attempts/:id/submit', auth, async (req, res) => {
       metadata: { attempt_id: attempt.id },
     });
 
-    // Send result email
+    // Send result email (non-blocking)
     const user = await User.findByPk(req.user.id);
-    await sendMail({ to: user.email, ...emailTemplates.results(user.name, attempt.exam_name, score, percentage) });
+    sendMail({ to: user.email, ...emailTemplates.results(user.name, attempt.exam_name, score, percentage) })
+      .catch(e => console.error('[Result email]', e.message));
 
     // Check badges
     await checkAndAwardBadges(req.user.id, percentage);
@@ -291,8 +310,14 @@ router.get('/attempts/:id/results', auth, async (req, res) => {
       ? Math.round((allAttempts.filter(a => a.percentage < attempt.percentage).length / allAttempts.length) * 100)
       : 50;
 
+    const attemptJson = attempt.toJSON();
+    const parseJson = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };
     res.json({
-      attempt: { ...attempt.toJSON(), exam_data: generated.exam_data },
+      attempt: {
+        ...attemptJson,
+        answers: parseJson(attemptJson.answers) || [],
+        exam_data: parseJson(generated.exam_data) || { sections: [] },
+      },
       analytics: { national_avg: nationalAvg, better_than_percent: betterThan },
     });
   } catch (err) {

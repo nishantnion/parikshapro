@@ -114,6 +114,15 @@ const startServer = async () => {
       } catch (e) { console.error('Cron error:', e.message); }
     });
 
+    // Purge expired question cache rows every hour
+    cron.schedule('0 * * * *', async () => {
+      try {
+        const { QuestionCache } = require('./models');
+        const deleted = await QuestionCache.destroy({ where: { expires_at: { [require('sequelize').Op.lt]: new Date() } } });
+        if (deleted) console.log(`[Cache] Purged ${deleted} expired question cache rows`);
+      } catch (e) {}
+    });
+
     // Contest status updates every minute
     cron.schedule('* * * * *', async () => {
       try {

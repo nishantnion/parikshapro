@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useLoading } from '../hooks/useLoading';
 import { examAPI, userAPI, contestAPI, studyAPI, tutorAPI, paymentAPI, forumAPI } from '../api';
 import toast from 'react-hot-toast';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
-const EXAM_ICONS = { jee: '⚙️', neet: '⚕️', upsc: '🏛️', ibps: '🏦', ssc: '📋', gate: '💻', nda: '⚔️', rrb: '🚂' };
+const EXAM_ICONS = { jee: '⚙️', jee_adv: '🔬', neet: '⚕️', upsc: '🏛️', ibps: '🏦', ssc: '📋', gate: '💻', nda: '⚔️', rrb: '🚂', cat: '📈', cuet: '🎓' };
+const EXAM_LABELS = { jee: 'JEE Main', jee_adv: 'JEE Advanced', neet: 'NEET UG', upsc: 'UPSC CSE', ibps: 'IBPS PO', ssc: 'SSC CGL', gate: 'GATE CS', nda: 'NDA', rrb: 'RRB NTPC', cat: 'CAT', cuet: 'CUET UG' };
 const PLAN_COLORS = { free: '#7070a0', starter: '#f7b731', monthly: '#00d4aa', semester: '#3b82f6', annual: '#a855f7', elite: '#ff6b35' };
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
@@ -160,7 +162,9 @@ export function ScheduleExam() {
       await refreshUser();
       navigate('/exam', { state: { attemptId: startRes.data.attempt_id, examData: startRes.data.exam_data, duration: startRes.data.duration_minutes } });
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to generate exam');
+      const msg = err.response?.data?.error;
+      if (err.response?.status === 403) toast.error('No tests remaining. Please buy a plan to continue.');
+      else toast.error(msg || 'Failed to generate exam. Please try again.');
     }
     setLoading(false);
   };
@@ -177,7 +181,7 @@ export function ScheduleExam() {
       });
       toast.success('📅 Exam scheduled! Reminder will be sent 30 mins before.');
       navigate('/dashboard');
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to schedule'); }
+    } catch (err) { toast.error(err.response?.data?.error || 'Could not schedule exam. Please try again.'); }
   };
 
   if (loading) return (
@@ -343,7 +347,7 @@ export function Results({ attemptId }) {
       const r = await examAPI.analyze(attemptId);
       setAnalysis(r.data.analysis);
       toast.success('AI analysis ready!');
-    } catch { toast.error('AI analysis failed'); }
+    } catch { toast.error('AI analysis failed. Please try again in a moment.'); }
     setLoadingAI(false);
   };
 
@@ -549,7 +553,7 @@ export function Contests() {
         };
         new window.Razorpay(options).open();
       }
-    } catch (err) { toast.error(err.response?.data?.error || 'Enrollment failed'); }
+    } catch (err) { toast.error(err.response?.data?.error || 'Could not enroll. Please try again.'); }
   };
 
   return (
@@ -658,7 +662,7 @@ export function Study() {
       const r = await studyAPI.aiNote({ topic, exam_category_id: examId, language: 'en' });
       setNote(r.data.note);
       toast.success('📚 Notes generated!');
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
+    } catch (err) { toast.error(err.response?.data?.error || 'Could not generate notes. Please try again.'); }
     setLoading(false);
   };
 
@@ -672,7 +676,7 @@ export function Study() {
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="label">Exam</label>
             <select className="input select" value={examId} onChange={e => { setExamId(e.target.value); setTopic(''); }}>
-              {Object.entries({ jee: 'JEE Main', neet: 'NEET UG', upsc: 'UPSC CSE', ibps: 'IBPS PO', ssc: 'SSC CGL', gate: 'GATE CS' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(EXAM_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -751,7 +755,7 @@ export function Forum() {
       setCreating(false);
       setForm({ title: '', body: '', exam_category_id: '', tags: '' });
       loadPosts();
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
+    } catch (err) { toast.error(err.response?.data?.error || 'Could not create post. Please try again.'); }
   };
 
   const submitReply = async (postId) => {
@@ -761,7 +765,7 @@ export function Forum() {
       toast.success('Reply posted!');
       setReplyBody('');
       if (selected) forumAPI.post(selected.id).then(r => setSelected(r.data.post));
-    } catch (err) { toast.error('Failed'); }
+    } catch (err) { toast.error('Could not post reply. Please try again.'); }
   };
 
   const vote = async (postId, v) => {
@@ -819,7 +823,7 @@ export function Forum() {
           <div className="form-group"><label className="label">Title</label><input className="input" placeholder="Your question or topic..." value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></div>
           <div className="form-group"><label className="label">Body</label><textarea className="input" rows={4} placeholder="Write your post..." value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} style={{ resize: 'vertical' }} /></div>
           <div className="grid-2">
-            <div className="form-group"><label className="label">Exam (optional)</label><select className="input select" value={form.exam_category_id} onChange={e => setForm(f => ({ ...f, exam_category_id: e.target.value }))}><option value="">All Exams</option>{Object.entries({ jee: 'JEE', neet: 'NEET', upsc: 'UPSC', ibps: 'IBPS', ssc: 'SSC', gate: 'GATE' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+            <div className="form-group"><label className="label">Exam (optional)</label><select className="input select" value={form.exam_category_id} onChange={e => setForm(f => ({ ...f, exam_category_id: e.target.value }))}><option value="">All Exams</option>{Object.entries(EXAM_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
             <div className="form-group"><label className="label">Tags (comma-separated)</label><input className="input" placeholder="physics, mechanics, doubt" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} /></div>
           </div>
           <div className="flex gap-8"><button className="btn btn-primary" onClick={submitPost}>Post</button><button className="btn btn-secondary" onClick={() => setCreating(false)}>Cancel</button></div>
@@ -827,7 +831,7 @@ export function Forum() {
       )}
 
       <div className="flex gap-8 mb-16 wrap">
-        {[['all', 'All'], ['jee', 'JEE'], ['neet', 'NEET'], ['upsc', 'UPSC'], ['ibps', 'Banking'], ['ssc', 'SSC'], ['gate', 'GATE']].map(([val, label]) => (
+        {[['all', 'All'], ...Object.entries(EXAM_LABELS).map(([k, v]) => [k, v])].map(([val, label]) => (
           <button key={val} className={`btn btn-sm ${filter === val ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilter(val)}>{label}</button>
         ))}
       </div>
@@ -937,7 +941,7 @@ export function Profile() {
       await userAPI.updateProfile(form);
       await refreshUser();
       toast.success('Profile updated!');
-    } catch { toast.error('Failed'); }
+    } catch { toast.error('Could not save profile. Please try again.'); }
   };
 
   const BADGE_INFO = { topper: { icon: '🏆', label: 'Topper', desc: '90%+ score' }, consistent: { icon: '🎯', label: 'Consistent', desc: '10+ tests' }, helper: { icon: '🤝', label: 'Helper', desc: '5+ forum posts' }, ambassador: { icon: '👑', label: 'Ambassador', desc: '5+ referrals' }, perfectionist: { icon: '💯', label: 'Perfectionist', desc: '100% score' } };
@@ -1002,48 +1006,145 @@ export function Profile() {
 export function Billing() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const { show: showLoader, hide: hideLoader } = useLoading();
   const [plans, setPlans] = useState({});
+  const [gstRate, setGstRate] = useState(0.18);
   const [history, setHistory] = useState([]);
   const [buying, setBuying] = useState(null);
 
   useEffect(() => {
-    paymentAPI.plans().then(r => setPlans(r.data.plans));
+    paymentAPI.plans().then(r => { setPlans(r.data.plans); setGstRate(r.data.gst_rate || 0.18); });
     paymentAPI.history().then(r => setHistory(r.data.transactions)).catch(() => {});
   }, []);
 
+  const withGst = (price) => Math.round(price * (1 + gstRate));
+
   const buy = async (planId, plan) => {
     setBuying(planId);
+    showLoader('Creating your order...');
     try {
       const orderRes = await paymentAPI.createOrder({ type: 'plan_purchase', plan_id: planId });
+      hideLoader();
       if (orderRes.data.mock_mode) {
+        showLoader('Activating plan...');
         await paymentAPI.mockComplete({ transaction_id: orderRes.data.transaction_id });
         await refreshUser();
+        hideLoader();
         toast.success(`✅ ${plan.name} activated! ${plan.tests} tests added.`);
+        paymentAPI.history().then(r => setHistory(r.data.transactions)).catch(() => {});
       } else {
+        if (!window.Razorpay) {
+          toast.error('Payment gateway failed to load. Please refresh the page and try again.');
+          setBuying(null);
+          return;
+        }
         const options = {
           key: orderRes.data.key_id, amount: orderRes.data.amount, currency: 'INR',
           name: 'ParikshaPro', description: plan.name, order_id: orderRes.data.order_id,
           handler: async (response) => {
-            await paymentAPI.verify({ ...response, transaction_id: orderRes.data.transaction_id });
-            await refreshUser();
-            toast.success(`✅ ${plan.name} activated!`);
+            showLoader('Verifying payment...');
+            try {
+              await paymentAPI.verify({ ...response, transaction_id: orderRes.data.transaction_id });
+              await refreshUser();
+              paymentAPI.history().then(r => setHistory(r.data.transactions)).catch(() => {});
+              toast.success(`✅ ${plan.name} activated! ${plan.tests} tests added to your account.`);
+            } catch {
+              toast.error('Payment received but activation failed. Please contact support.');
+            } finally {
+              hideLoader();
+            }
           },
+          modal: { ondismiss: () => { setBuying(null); toast('Payment cancelled.', { icon: 'ℹ️' }); } },
           prefill: { name: user?.name, email: user?.email },
           theme: { color: '#f7b731' },
         };
         new window.Razorpay(options).open();
+        return; // don't clear buying until modal closes
       }
-    } catch (err) { toast.error(err.response?.data?.error || 'Purchase failed'); }
+    } catch (err) {
+      hideLoader();
+      const msg = err.response?.data?.error;
+      if (err.response?.status === 401) toast.error('Session expired. Please log in again.');
+      else if (err.response?.status === 400) toast.error(msg || 'Invalid request. Please try again.');
+      else toast.error(msg || 'Payment failed. Please try again.');
+    }
     setBuying(null);
   };
 
   const PLAN_DISPLAY = [
-    { id: 'starter', label: 'Starter Pack', price: '₹9', tests: '5 tests', validity: '30 days' },
-    { id: 'monthly', label: 'Monthly Pro', price: '₹49/mo', tests: '20 tests', validity: '1 month', popular: true },
-    { id: 'semester', label: 'Semester Pack', price: '₹59', tests: '15 tests', validity: '2 months' },
-    { id: 'annual', label: 'Annual Pro', price: '₹299/yr', tests: '100 tests', validity: '1 year' },
-    { id: 'elite', label: 'All India Elite', price: '₹499/yr', tests: 'Unlimited', validity: '1 year', elite: true },
+    {
+      id: 'starter', label: 'Starter Pack', basePrice: 9, validity: '30 days', popular: false,
+      highlight: '5 Mock Tests',
+      features: [
+        '5 full-length mock tests',
+        'Detailed score analysis',
+        'Topic-wise breakdown',
+        'Valid for 30 days',
+        'All exam categories',
+      ],
+    },
+    {
+      id: 'monthly', label: 'Monthly Pro', basePrice: 49, validity: '1 month', popular: true,
+      highlight: '20 Mock Tests',
+      features: [
+        '20 full-length mock tests',
+        'AI-powered exam generation',
+        'Detailed performance analytics',
+        'Leaderboard & rank comparison',
+        'Study notes access',
+        'Valid for 1 month',
+      ],
+    },
+    {
+      id: 'semester', label: 'Semester Pack', basePrice: 59, validity: '2 months',
+      highlight: '15 Mock Tests',
+      features: [
+        '15 full-length mock tests',
+        'AI-powered exam generation',
+        'Detailed performance analytics',
+        'Study notes access',
+        'Forum community access',
+        'Valid for 2 months',
+      ],
+    },
+    {
+      id: 'annual', label: 'Annual Pro', basePrice: 299, validity: '1 year',
+      highlight: '100 Mock Tests',
+      features: [
+        '100 full-length mock tests',
+        'AI-powered exam generation',
+        'Advanced analytics & insights',
+        'All study materials',
+        'Contest entries (5 free)',
+        'Priority support',
+        'Valid for 1 year',
+      ],
+    },
+    {
+      id: 'elite', label: 'All India Elite', basePrice: 499, validity: '1 year', elite: true,
+      highlight: 'Unlimited Tests',
+      features: [
+        'Unlimited mock tests',
+        'AI tutor (unlimited sessions)',
+        'Live All India mock contests',
+        'Full analytics dashboard',
+        'All study materials & notes',
+        'Unlimited contest entries',
+        '1-on-1 doubt support',
+        'Valid for 1 year',
+      ],
+    },
   ];
+
+  const PLAN_RANK = { free: 0, starter: 1, monthly: 2, semester: 3, annual: 4, elite: 5 };
+  const currentRank = PLAN_RANK[user?.plan_type] ?? 0;
+
+  const getPlanAction = (p) => {
+    const rank = PLAN_RANK[p.id] ?? 0;
+    if (user?.plan_type === p.id) return 'current';
+    if (rank < currentRank) return 'downgrade';
+    return 'upgrade';
+  };
 
   return (
     <div className="page-container">
@@ -1059,24 +1160,64 @@ export function Billing() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
-        {PLAN_DISPLAY.map(p => (
-          <div key={p.id} className="card" style={{ borderColor: user?.plan_type === p.id ? PLAN_COLORS[p.id] : p.elite ? 'var(--accent3)' : 'var(--border)', position: 'relative', textAlign: 'center' }}>
-            {p.popular && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent)', color: '#000', fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 20, whiteSpace: 'nowrap' }}>⭐ POPULAR</div>}
-            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 18, marginBottom: 4 }}>{p.label}</div>
-            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 44, color: PLAN_COLORS[p.id] || 'var(--accent)', lineHeight: 1 }}>{p.price}</div>
-            <div className="text-muted text-xs">{p.validity}</div>
-            <div className="divider" />
-            <div style={{ fontWeight: 700, color: PLAN_COLORS[p.id] || 'var(--accent)', fontSize: 16, marginBottom: 16 }}>{p.tests}</div>
-            {user?.plan_type === p.id ? (
-              <button className="btn btn-secondary btn-sm btn-full" disabled>✅ Current</button>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 24 }}>
+        {PLAN_DISPLAY.map(p => {
+          const finalPrice = withGst(p.basePrice);
+          const action = getPlanAction(p);
+          const color = PLAN_COLORS[p.id] || 'var(--accent)';
+          const isCurrent = action === 'current';
+          return (
+          <div key={p.id} className="card" style={{
+            borderColor: isCurrent ? color : p.elite ? 'var(--accent3)' : 'var(--border)',
+            position: 'relative',
+            display: 'flex', flexDirection: 'column',
+            background: isCurrent ? `${color}0d` : undefined,
+          }}>
+            {/* Badge */}
+            {p.popular && currentRank === 0 && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: 'var(--accent)', color: '#000', fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 20, whiteSpace: 'nowrap' }}>⭐ POPULAR</div>}
+            {action === 'upgrade' && currentRank > 0 && PLAN_RANK[p.id] === currentRank + 1 && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: '#00d4aa', color: '#000', fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 20, whiteSpace: 'nowrap' }}>⬆ NEXT STEP</div>}
+            {p.elite && action === 'upgrade' && <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: PLAN_COLORS.elite, color: '#fff', fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 20, whiteSpace: 'nowrap' }}>👑 BEST VALUE</div>}
+
+            {/* Header */}
+            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 20, letterSpacing: 1, marginBottom: 2 }}>{p.label}</div>
+
+            {/* Price */}
+            <div style={{ fontFamily: "'Bebas Neue'", fontSize: 48, color, lineHeight: 1, margin: '8px 0 2px' }}>₹{p.basePrice}</div>
+            <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>+ 18% GST = ₹{finalPrice}</div>
+
+            {/* Highlight */}
+            <div style={{ background: `${color}22`, color, fontWeight: 800, fontSize: 13, borderRadius: 6, padding: '5px 10px', marginBottom: 12, display: 'inline-block', alignSelf: 'flex-start' }}>
+              {p.highlight} • {p.validity}
+            </div>
+
+            {/* Features */}
+            <div style={{ flex: 1, marginBottom: 16 }}>
+              {p.features.map((f, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text)', marginBottom: 6 }}>
+                  <span style={{ color, fontWeight: 700, flexShrink: 0 }}>✓</span>
+                  <span>{f}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* CTA */}
+            {isCurrent ? (
+              <button className="btn btn-secondary btn-sm btn-full" disabled>✅ Current Plan</button>
+            ) : action === 'downgrade' ? (
+              <button className="btn btn-secondary btn-sm btn-full" disabled style={{ opacity: 0.4, cursor: 'not-allowed' }}>Not Available</button>
             ) : (
-              <button className="btn btn-primary btn-sm btn-full" style={{ background: PLAN_COLORS[p.id] || 'var(--accent)' }} onClick={() => buy(p.id, plans[p.id] || {})} disabled={buying === p.id}>
-                {buying === p.id ? '⏳...' : `Buy ${p.price}`}
+              <button
+                className="btn btn-primary btn-sm btn-full"
+                style={{ background: color, color: p.elite ? '#fff' : '#000', fontWeight: 800, border: 'none' }}
+                onClick={() => buy(p.id, plans[p.id] || {})}
+                disabled={buying === p.id}
+              >
+                {buying === p.id ? '⏳ Processing...' : `Buy Now — ₹${finalPrice}`}
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="card mb-24">

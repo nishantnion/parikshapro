@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { LoadingProvider } from './hooks/useLoading';
 import Sidebar from './components/Sidebar';
 import { Dashboard, ScheduleExam, MyTests, Results, Contests, Study, Forum, AITutor, Profile, Billing, Notifications } from './pages/index';
 import ExamRoom from './pages/ExamRoom';
@@ -50,6 +51,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <LoadingProvider>
         <Toaster position="top-right" toastOptions={{ style: { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 10, fontFamily: "'DM Sans', sans-serif" }, duration: 3000 }} />
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -71,6 +73,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </LoadingProvider>
       </AuthProvider>
     </BrowserRouter>
   );

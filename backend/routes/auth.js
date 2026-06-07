@@ -54,10 +54,14 @@ router.post('/register', [
       }
     }
 
-    // Send welcome + OTP email
-    const { subject, html } = emailTemplates.welcome(name, referralCodeNew);
-    await sendMail({ to: email, subject, html });
-    await sendMail({ to: email, ...emailTemplates.otp(name, otp) });
+    // Send welcome + OTP email — rollback user if email fails
+    try {
+      await sendMail({ to: email, ...emailTemplates.welcome(name, referralCodeNew) });
+      await sendMail({ to: email, ...emailTemplates.otp(name, otp) });
+    } catch (emailErr) {
+      await user.destroy();
+      return res.status(500).json({ error: 'Registration failed', detail: 'Could not send verification email. Please try again.' });
+    }
 
     // Notification
     await Notification.create({ user_id: user.id, type: 'system', title: 'Welcome to ParikshaPro! 🎉', body: 'You have 5 free mock tests. Start your exam prep today!' });

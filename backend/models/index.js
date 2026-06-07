@@ -214,6 +214,15 @@ const UserBadge = sequelize.define('UserBadge', {
   badge_type: { type: DataTypes.ENUM('topper', 'helper', 'consistent', 'ambassador', 'speedster', 'perfectionist'), allowNull: false },
 }, { tableName: 'user_badges' });
 
+// ── QUESTION CACHE ────────────────────────────────────────────────────────────
+const QuestionCache = sequelize.define('QuestionCache', {
+  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+  cache_key: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+  exam_data: { type: DataTypes.JSON, allowNull: false },
+  hit_count: { type: DataTypes.INTEGER, defaultValue: 0 },
+  expires_at: { type: DataTypes.DATE, allowNull: false },
+}, { tableName: 'question_cache' });
+
 // ── FORUM VOTE ────────────────────────────────────────────────────────────────
 const ForumVote = sequelize.define('ForumVote', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
@@ -248,5 +257,5 @@ User.hasMany(Subscription, { foreignKey: 'user_id' });
 module.exports = {
   sequelize, User, ExamCategory, ScheduledExam, GeneratedExam,
   ExamAttempt, Contest, ContestEnrollment, Subscription, Transaction,
-  Referral, StudyNote, ForumPost, ForumReply, Notification, UserBadge, ForumVote
+  Referral, StudyNote, ForumPost, ForumReply, Notification, UserBadge, ForumVote, QuestionCache
 };

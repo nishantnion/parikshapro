@@ -2,6 +2,7 @@ const router = require('express').Router();
 const crypto = require('crypto');
 const { auth } = require('../middleware/auth');
 const { User, Transaction, Subscription, Notification, ContestEnrollment } = require('../models');
+const { sendMail, emailTemplates } = require('../utils/email');
 
 const getRazorpay = () => {
   if (!process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === 'your_razorpay_key_id') {
@@ -20,6 +21,108 @@ const PLANS = {
 };
 
 const GST_RATE = 0.18;
+
+// Create a Razorpay invoice for a completed payment and return its short_url.
+// Falls back gracefully if Razorpay keys are absent (mock mode).
+const createRazorpayInvoice = async ({ user, transaction, plan, expiresAt, paymentId }) => {
+  const razorpay = getRazorpay();
+  if (!razorpay) return null; // mock mode — skip
+
+  try {
+    const invoice = await razorpay.invoices.create({
+      type: 'invoice',
+      date: Math.floor(Date.now() / 1000),
+      receipt: transaction.invoice_number,
+      customer: {
+        name: user.name,
+        email: user.email,
+        contact: user.phone || '',
+      },
+      line_items: [
+        {
+          name: plan.name,
+          description: `${plan.tests} mock tests, valid ${plan.validity_days} days`,
+          amount: transaction.amount * 100, // paise, pre-GST
+          currency: 'INR',
+          quantity: 1,
+        },
+      ],
+      tax_id: null,
+      sms_notify: 0,
+      email_notify: 0, // we send our own branded email
+      currency: 'INR',
+      payment_id: paymentId && !paymentId.startsWith('MOCK') ? paymentId : undefined,
+      notes: {
+        invoice_number: transaction.invoice_number,
+        plan: plan.name,
+        valid_till: expiresAt.toLocaleDateString('en-IN'),
+      },
+    });
+
+    return invoice.short_url || null;
+  } catch (err) {
+    console.error('[Razorpay invoice]', err.message);
+    return null;
+  }
+};
+
+// Activate a plan, send invoice email, and optionally create a Razorpay invoice.
+const activatePlan = async ({ user, transaction, metadata, paymentId, isMock }) => {
+  const plan = PLANS[metadata.plan_id];
+  if (!plan) throw new Error(`Plan "${metadata.plan_id}" not found`);
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + plan.validity_days);
+
+  await Subscription.create({
+    user_id: user.id, plan_type: metadata.plan_id,
+    starts_at: new Date(), expires_at: expiresAt,
+    tests_included: plan.tests, tests_used: 0,
+    status: 'active', amount_paid: transaction.amount,
+  });
+
+  await user.update({
+    plan_type: metadata.plan_id,
+    plan_expiry: expiresAt,
+    tests_remaining: user.tests_remaining + plan.tests,
+  });
+
+  await Notification.create({
+    user_id: user.id, type: 'system',
+    title: `✅ ${plan.name} Activated!`,
+    body: `${plan.tests} tests added to your account. Valid till ${expiresAt.toLocaleDateString('en-IN')}`,
+  });
+
+  // Create Razorpay invoice (skipped in mock mode)
+  const razorpayInvoiceUrl = isMock
+    ? null
+    : await createRazorpayInvoice({ user, transaction, plan, expiresAt, paymentId });
+
+  // Persist the Razorpay invoice URL on the transaction for later retrieval
+  if (razorpayInvoiceUrl) {
+    const raw = transaction.metadata;
+    const meta = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+    await transaction.update({ metadata: { ...meta, razorpay_invoice_url: razorpayInvoiceUrl } });
+  }
+
+  const invoiceData = {
+    number: transaction.invoice_number,
+    date: transaction.created_at,
+    description: plan.name,
+    testsAdded: plan.tests,
+    validTill: expiresAt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+    amount: transaction.amount,
+    gst: transaction.amount_with_gst - transaction.amount,
+    total: transaction.amount_with_gst,
+    paymentId,
+    razorpayInvoiceUrl,
+  };
+
+  sendMail({ to: user.email, ...emailTemplates.invoice(user.name, invoiceData) })
+    .catch(e => console.error('[Invoice email]', e.message));
+
+  return { plan, expiresAt, razorpayInvoiceUrl };
+};
 
 // ── CREATE ORDER ──────────────────────────────────────────────────────────────
 router.post('/create-order', auth, async (req, res) => {
@@ -113,47 +216,36 @@ router.post('/verify', auth, async (req, res) => {
       }
     }
 
-    await transaction.update({ razorpay_payment_id: razorpay_payment_id || 'MOCK', status: 'success' });
+    const paymentId = razorpay_payment_id || 'MOCK';
+    await transaction.update({ razorpay_payment_id: paymentId, status: 'success' });
 
     const user = await User.findByPk(req.user.id);
-    const metadata = transaction.metadata || {};
+    const raw = transaction.metadata;
+    const metadata = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
 
-    // Handle plan purchase
+    let razorpayInvoiceUrl = null;
+
     if (transaction.type === 'plan_purchase') {
-      const plan = PLANS[metadata.plan_id];
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + plan.validity_days);
-
-      await Subscription.create({
-        user_id: user.id, plan_type: metadata.plan_id,
-        starts_at: new Date(), expires_at: expiresAt,
-        tests_included: plan.tests, tests_used: 0,
-        status: 'active', amount_paid: transaction.amount,
+      const result = await activatePlan({
+        user, transaction, metadata, paymentId, isMock: !!mock_payment,
       });
-
-      await user.update({
-        plan_type: metadata.plan_id,
-        plan_expiry: expiresAt,
-        tests_remaining: user.tests_remaining + plan.tests,
-      });
-
-      await Notification.create({
-        user_id: user.id, type: 'system',
-        title: `✅ ${plan.name} Activated!`,
-        body: `${plan.tests} tests added to your account. Valid till ${expiresAt.toLocaleDateString('en-IN')}`,
-      });
+      razorpayInvoiceUrl = result.razorpayInvoiceUrl;
     }
 
-    // Handle contest enrollment
     if (transaction.type === 'contest_enrollment' && metadata.contest_id) {
       await ContestEnrollment.create({
         contest_id: metadata.contest_id,
         user_id: user.id,
-        payment_id: razorpay_payment_id || 'MOCK',
+        payment_id: paymentId,
       });
     }
 
-    res.json({ success: true, message: 'Payment verified', invoice: transaction.invoice_number });
+    res.json({
+      success: true,
+      message: 'Payment verified',
+      invoice: transaction.invoice_number,
+      razorpay_invoice_url: razorpayInvoiceUrl,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -185,30 +277,23 @@ router.post('/webhook', async (req, res) => {
 router.post('/mock-complete', auth, async (req, res) => {
   try {
     const { transaction_id } = req.body;
-    const result = await require('express').Router();
-    // Reuse verify logic
-    req.body.mock_payment = true;
-    req.body.razorpay_payment_id = 'MOCK_' + Date.now();
 
     const transaction = await Transaction.findOne({ where: { id: transaction_id, user_id: req.user.id } });
     if (!transaction) return res.status(404).json({ error: 'Not found' });
 
-    await transaction.update({ razorpay_payment_id: 'MOCK_' + Date.now(), status: 'success' });
+    const paymentId = 'MOCK_' + Date.now();
+    await transaction.update({ razorpay_payment_id: paymentId, status: 'success' });
 
     const user = await User.findByPk(req.user.id);
-    const metadata = transaction.metadata || {};
+    const rawMeta = transaction.metadata;
+    const metadata = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : (rawMeta || {});
 
     if (transaction.type === 'plan_purchase') {
-      const plan = PLANS[metadata.plan_id];
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + plan.validity_days);
-      await Subscription.create({ user_id: user.id, plan_type: metadata.plan_id, starts_at: new Date(), expires_at: expiresAt, tests_included: plan.tests, tests_used: 0, status: 'active', amount_paid: transaction.amount });
-      await user.update({ plan_type: metadata.plan_id, plan_expiry: expiresAt, tests_remaining: user.tests_remaining + plan.tests });
-      await Notification.create({ user_id: user.id, type: 'system', title: `✅ ${plan.name} Activated!`, body: `${plan.tests} tests added. Valid till ${expiresAt.toLocaleDateString('en-IN')}` });
+      await activatePlan({ user, transaction, metadata, paymentId, isMock: true });
     }
 
     if (transaction.type === 'contest_enrollment' && metadata.contest_id) {
-      await ContestEnrollment.create({ contest_id: metadata.contest_id, user_id: user.id, payment_id: 'MOCK_' + Date.now() });
+      await ContestEnrollment.create({ contest_id: metadata.contest_id, user_id: user.id, payment_id: paymentId });
     }
 
     const updatedUser = await User.findByPk(user.id, { attributes: { exclude: ['password_hash', 'otp', 'refresh_token'] } });
@@ -238,6 +323,7 @@ router.get('/invoice/:id', auth, async (req, res) => {
     const transaction = await Transaction.findOne({ where: { id: req.params.id, user_id: req.user.id, status: 'success' } });
     if (!transaction) return res.status(404).json({ error: 'Invoice not found' });
     const user = await User.findByPk(req.user.id);
+    const meta = transaction.metadata || {};
     res.json({
       invoice: {
         number: transaction.invoice_number,
@@ -246,8 +332,9 @@ router.get('/invoice/:id', auth, async (req, res) => {
         amount: transaction.amount,
         gst: transaction.amount_with_gst - transaction.amount,
         total: transaction.amount_with_gst,
-        description: transaction.metadata?.description,
+        description: meta.description,
         payment_id: transaction.razorpay_payment_id,
+        razorpay_invoice_url: meta.razorpay_invoice_url || null,
       }
     });
   } catch (err) {
